@@ -1,0 +1,37 @@
+{
+    "path":{
+        "cache":"/data/liuxinyu/LongData/.cache",
+        "pg19":"/data/liuxinyu/LongData/pg19-hf-parquet/data",
+        "tokenizer_path":"/data/liuxinyu/models/llama-2-7b-chat",
+        "prepare_data_path":"/data/liuxinyu/LongData/pg19-hf-parquet"  
+    },
+    "training_config":{
+        "segment_len":1024,
+        "total_batch_size":512,
+        "batch_size_per_device":8,
+        "device_count":4,
+        "gradient_accumulation_steps":16,
+        "log_step":10,
+        "save_step":500,
+        "save_dir":"/data/liuxinyu/LongData/models/llama/0"
+    },
+    "model_cofig":{
+        "hidden_act": "silu",
+        "hidden_size": 512,
+        "initializer_range": 0.02,
+        "intermediate_size": 2048,
+        "max_position_embeddings": 1024,
+        "model_type": "llama",
+        "num_attention_heads": 8,
+        "num_hidden_layers": 32,
+        "num_key_value_heads": 2,
+        "pretraining_tp": 1,
+        "rms_norm_eps": 1e-05,
+        "rope_scaling": null,
+        "tie_word_embeddings": false,
+        "torch_dtype": "float16",
+        "transformers_version": "4.31.0.dev0",
+        "use_cache": true,
+        "vocab_size": 32000
+    }
+}
