@@ -10,6 +10,13 @@ import json
 from tqdm import tqdm
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
+import argparse
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config_path', type=str, required=True, help='Path to the configuration file')
+    return parser.parse_args()
 
 
 class LMOrderedDataset(IterableDataset):
@@ -26,8 +33,21 @@ class LMOrderedDataset(IterableDataset):
             end_idx = beg_idx + self.seg_len
             yield self.data[beg_idx:end_idx].t().contiguous()  # [batch_size,seg_len]
 
-    # def __len__(self):
-    #     return self.data.size(0)//self.seg_len
+class LMShuffleDataset(IterableDataset):
+    def __init__(self, data, batch_size, seg_len):
+        super(LMShuffleDataset).__init__()
+
+        self.batch_size = batch_size
+        self.seg_len = seg_len
+        self.data = data.view(-1, seg_len).contiguous()  # data: [segment_num,segment_len]
+        torch.manual_seed(0)
+        random_permutation = torch.randperm(self.data.size(0))
+        self.data = self.data[random_permutation] # data: [segment_num,segment_len]
+
+    def __iter__(self):
+        for beg_idx in range(0, self.data.size(0) - 1, self.batch_size):
+            end_idx = beg_idx + self.batch_size
+            yield self.data[beg_idx:end_idx].contiguous()  # [batch_size,seg_len]
 
 
 
@@ -63,9 +83,9 @@ def count_parameters(model):
 
 
 # Training process
-def train(rank, world_size):
+def train(rank, args, world_size):
     
-    with open("config.json") as f:
+    with open(args.config_path) as f:
         config=json.load(f)
 
     setup(rank, world_size)
@@ -108,7 +128,11 @@ def train(rank, world_size):
     ddp_model = DDP(model, device_ids=[rank])
 
     # Instantiate the data loader
-    dataset = LMOrderedDataset(tokens,training_config['batch_size_per_device'], training_config["segment_len"])
+    if training_config["dataloader_type"]=="shuffle":
+        dataset = LMShuffleDataset(tokens,training_config['batch_size_per_device'], training_config["segment_len"])
+    else:
+        dataset = LMOrderedDataset(tokens,training_config['batch_size_per_device'], training_config["segment_len"])
+    
 
     loader = DataLoader(dataset, batch_size=None)
     # print(len(loader))
@@ -134,7 +158,10 @@ def train(rank, world_size):
             with open(os.path.join(training_config["save_dir"],"info.json"),'w') as f:
                 json.dump(info_list,f,indent=4)
 
-            torch.save(ddp_model.state_dict(),os.path.join(training_config["save_dir"],"model.pt"))
+            with open(os.path.join(training_config["save_dir"],"config.json"),'w') as f:
+                json.dump(config,f,indent=4)
+
+            torch.save(model.state_dict(),os.path.join(training_config["save_dir"],"model.pt"))
             torch.save(optimizer.state_dict(),os.path.join(training_config["save_dir"],"optimizer.pt"))
             if scheduler is not None:
                 torch.save(scheduler.state_dict(),os.path.join(training_config["save_dir"],"scheduler.pt"))
@@ -180,15 +207,16 @@ def train(rank, world_size):
 
 # Launch multi-process training
 if __name__ == "__main__":
+    args = parse_args()
     world_size = torch.cuda.device_count()
     mp.spawn(train,
-             args=(world_size,),
+             args=(args,world_size),
              nprocs=world_size,
              join=True)
 
 """
 # 用 > train.log 无法实时查看输出
-CUDA_VISIBLE_DEVICES=4,5,6,7 python /home/liuxinyu/zrs/forget-me-not/train.py 
+CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/debug/config.json > train.log 
 """
 
 
