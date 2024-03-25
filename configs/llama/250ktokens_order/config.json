@@ -6,15 +6,15 @@
         "prepare_data_path":"/data/liuxinyu/LongData/pg19-hf-parquet"
     },
     "training_config":{
-        "dataloader_type":"shuffle",
+        "dataloader_type":"order",
         "segment_len":1024,
-        "total_batch_size":512,
+        "total_batch_size":256,
         "batch_size_per_device":8,
         "device_count":4,
-        "gradient_accumulation_steps":16,
+        "gradient_accumulation_steps":8,
         "log_step":10,
         "save_step":10000,
-        "save_dir":"/data/liuxinyu/LongData/models/llama/shuffle0"
+        "save_dir":"/data/liuxinyu/LongData/models/llama/250ktokens_order"
     },
     "model_config":{
         "hidden_act": "silu",
@@ -37,6 +37,6 @@
     },
     "eval_config":
     {
-        "save_dir":"/data/liuxinyu/LongData/models/llama/shuffle0"
+        "save_dir":"/data/liuxinyu/LongData/models/llama/250ktokens_order"
     }
 }

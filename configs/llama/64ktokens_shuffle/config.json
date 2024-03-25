@@ -8,13 +8,13 @@
     "training_config":{
         "dataloader_type":"shuffle",
         "segment_len":1024,
-        "total_batch_size":512,
+        "total_batch_size":64,
         "batch_size_per_device":8,
         "device_count":4,
-        "gradient_accumulation_steps":16,
+        "gradient_accumulation_steps":2,
         "log_step":10,
-        "save_step":10000,
-        "save_dir":"/data/liuxinyu/LongData/models/llama/shuffle0"
+        "save_step":100000,
+        "save_dir":"/data/liuxinyu/LongData/models/llama/64ktokens_shuffle"
     },
     "model_config":{
         "hidden_act": "silu",
@@ -37,6 +37,6 @@
     },
     "eval_config":
     {
-        "save_dir":"/data/liuxinyu/LongData/models/llama/shuffle0"
+        "save_dir":"/data/liuxinyu/LongData/models/llama/64ktokens_shuffle"
     }
 }

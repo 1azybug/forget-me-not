@@ -73,9 +73,12 @@ def training_step(ddp_model, inputs, rank, accumulation_steps):
 
 
 
-def count_parameters(model):
+def count_parameters(model, config):
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     embedding_params = sum(p.numel() for name,p in model.named_parameters() if p.requires_grad and ('lm_head' in name or "emb" in name))
+    config["Total_parameters"] = params
+    config["Embedding_parameters"] = embedding_params
+    config["non-Embedding_parameters"] = params-embedding_params
     print(f"Total parameters: {params}")
     print(f"Embedding parameters: {embedding_params}")
     print(f"non-Embedding parameters: {params-embedding_params}")
@@ -119,11 +122,11 @@ def train(rank, args, world_size):
     print(f"[INFO] rank{rank} training tokens[{start_index}:{end_index}] | total_tokens:{tokens.shape[0]} | batch_tokens_num_per_gpu:{tokens.shape[0]//training_steps} | training_steps:{training_steps}")
 
     # Instantiate the model and move it to the corresponding GPU
-    cfg = LlamaConfig(**config["model_cofig"])
+    cfg = LlamaConfig(**config["model_config"])
     model = LlamaForCausalLM(cfg).to(rank)
 
     if rank == 0:
-        count_parameters(model)
+        count_parameters(model, config)
     
     ddp_model = DDP(model, device_ids=[rank])
 
