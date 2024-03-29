@@ -48,8 +48,10 @@ class Evaluator:
 
         loss_values = [entry['training_loss'] for entry in info_list]
         step_values = [entry['steps'] for entry in info_list]
+        lr_values = [entry['learning_rate'] for entry in info_list]
 
-        self.draw(step_values, loss_values, xlabel="Step", ylabel="training_loss", label_training_len=False)
+        self.draw(step_values, loss_values, xlabel="Step", ylabel="training loss", label_training_len=False)
+        self.draw(step_values, lr_values, xlabel="Step", ylabel="learning rate", label_training_len= False)
 
     def draw(self, x, y, xlabel, ylabel, label_training_len=False):
         plt.figure(figsize=(10, 5))
@@ -246,6 +248,7 @@ if __name__ == "__main__":
         config=json.load(f)
 
     # the save_dir will save a copy of the config in training
+    config["eval_config"]["save_dir"] += '/'+ args.config_path.split('/')[-2]
     with open(os.path.join(config["eval_config"]["save_dir"],"config.json")) as f:
         config=json.load(f)
 
@@ -254,5 +257,5 @@ if __name__ == "__main__":
 
 
 """
-CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/llama/1/config.json
+CUDA_VISIBLE_DEVICES=3 python ./evaluator.py --config_path ./configs/llama/1/config.json
 """

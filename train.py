@@ -12,6 +12,8 @@ from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 import argparse
 
+from utils.scheduler import get_scheduler
+from models.model import modify
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -55,7 +57,7 @@ class LMShuffleDataset(IterableDataset):
 # Initialize process group
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['MASTER_PORT'] = '12354'
 
     # Initialize the distributed environment
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
@@ -90,6 +92,9 @@ def train(rank, args, world_size):
     
     with open(args.config_path) as f:
         config=json.load(f)
+    config["training_config"]["save_dir"] += '/'+ args.config_path.split('/')[-2]
+    config["eval_config"]["save_dir"] += '/'+ args.config_path.split('/')[-2]
+
 
     setup(rank, world_size)
     torch.cuda.set_device(rank)
@@ -121,9 +126,15 @@ def train(rank, args, world_size):
         print(f"[INFO] batch_tokens:{batch_tokens_num} | training_steps:{training_steps}")
     print(f"[INFO] rank{rank} training tokens[{start_index}:{end_index}] | total_tokens:{tokens.shape[0]} | batch_tokens_num_per_gpu:{tokens.shape[0]//training_steps} | training_steps:{training_steps}")
 
+
+    # modify the model
+    if "modify_config" in config:
+        modify(config["modify_config"])
+    
     # Instantiate the model and move it to the corresponding GPU
     cfg = LlamaConfig(**config["model_config"])
     model = LlamaForCausalLM(cfg).to(rank)
+    # print(model.config._attn_implementation) # sdpa
 
     if rank == 0:
         count_parameters(model, config)
@@ -141,9 +152,12 @@ def train(rank, args, world_size):
     # print(len(loader))
 
     # Instantiate  optimizer
-    optimizer = torch.optim.Adam(ddp_model.parameters(), lr=0.001)
+    optimizer = torch.optim.AdamW(ddp_model.parameters(), lr=training_config["learning_rate"], betas=(0.9, 0.95), weight_decay=0.1)
 
     scheduler = None
+    if "scheduler_config" in training_config:
+        scheduler = get_scheduler(training_config["scheduler_config"], optimizer, training_steps)
+    
     memory = None
 
 
@@ -191,7 +205,14 @@ def train(rank, args, world_size):
                 "learning_rate":optimizer.param_groups[0]['lr']})
             
             if step_num % accumulation_steps == 0:
+                torch.nn.utils.clip_grad_norm_(ddp_model.parameters(), training_config["max_grad_norm"])
                 optimizer.step()
+                if scheduler is not None:
+                    if training_config["scheduler_config"]["type"]=="stage":
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
+                    
                 optimizer.zero_grad()
 
             
