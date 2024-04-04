@@ -51,8 +51,18 @@
 # CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/llama/patience2000/config.json
 # CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/llama/patience2000/config.json
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/llama/cosine/config.json
-CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/llama/cosine/config.json
+# CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/llama/cosine/config.json
+# CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/llama/cosine/config.json
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/modify/keynorm/config.json
-CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/modify/keynorm/config.json
+# CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/modify/keynorm/config.json
+# CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/modify/keynorm/config.json
+
+# CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/modify/cache/config.json
+
+# CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/modify/cacheMen256Work768/config.json
+
+CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/modify/shuffle_cache/config.json
+CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/modify/shuffle_cache/config.json
+
+CUDA_VISIBLE_DEVICES=4,5,6,7 python ./train.py --config_path ./configs/modify/order_keynorm/config.json
+CUDA_VISIBLE_DEVICES=4,5,6,7 python ./evaluator.py --config_path ./configs/modify/order_keynorm/config.json

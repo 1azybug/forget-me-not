@@ -37,7 +37,7 @@ def get_cosine_scheduler(scheduler_config, optimizer, training_steps):
 
 def get_scheduler(scheduler_config, optimizer, training_steps):
     if scheduler_config["type"] == "wsd":
-        print("[INFO] Use WSD Schduler")
+        print("[INFO] Use WSD Scheduler")
         return get_wsd_scheduler(scheduler_config, optimizer, training_steps)
 
     elif scheduler_config["type"] == "stage":

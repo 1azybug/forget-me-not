@@ -11,6 +11,8 @@ import argparse
 import json
 from evaluate.work_mem import draw_work_memory
 
+from models.model import modify
+from models.cache import get_eval_cache
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -36,11 +38,25 @@ class Evaluator:
             self.config["model_config"]["max_position_embeddings"] = test_length
             self.config["eval_config"]["test_length"] = test_length
 
+        # modify the model
+        if "modify_config" in config:
+            modify(config["modify_config"])
+
         cfg = LlamaConfig(**self.config["model_config"])
         self.model = LlamaForCausalLM(cfg)
         state_dict = torch.load(os.path.join(config["eval_config"]["save_dir"],"model.pt"))
         self.model.load_state_dict(state_dict)
         self.model.to('cuda')
+        
+        self.memory = None
+        mem_path = os.path.join(config["eval_config"]["save_dir"],"memory.pt")
+        if os.path.exists(mem_path):
+            self.memory = get_eval_cache(config)
+            # pass save_path to memory
+            self.memory.load_state_dict(torch.load(mem_path), path=mem_path)
+            # only leave one memory
+            self.memory.reduce2one()
+            self.memory.to('cuda')
 
     def draw_loss(self):
         with open(os.path.join(self.config["eval_config"]["save_dir"],"info.json")) as f:
@@ -67,13 +83,13 @@ class Evaluator:
         plt.legend()
         plt.grid(True)
         plt.show()
-        plt.savefig(os.path.join(self.config["eval_config"]["save_dir"], ylabel+'.png'))
+        plt.savefig(os.path.join(self.config["eval_config"]["save_dir"], self.config['title']+'_'+ylabel+'.png'))
         plt.close()
 
     def sliding_ppl(self, tokens, stride, split):
 
-        if os.path.exists(os.path.join(self.config["eval_config"]["save_dir"],f"{split}_sliding_cache.json")):
-            with open(os.path.join(self.config["eval_config"]["save_dir"],f"{split}_sliding_cache.json")) as f:
+        if os.path.exists(os.path.join(self.config["eval_config"]["save_dir"],f"{self.config['title']}_{split}_sliding_cache.json")):
+            with open(os.path.join(self.config["eval_config"]["save_dir"],f"{self.config['title']}_{split}_sliding_cache.json")) as f:
                 result = json.load(f)
             return result
 
@@ -89,6 +105,8 @@ class Evaluator:
             input_ids = tokens[begin_loc:end_loc]
             labels = input_ids.clone()
             labels[:-trg_len] = -100
+            
+            # print(f"[DEBUG] calculate tokens[{begin_loc}:{end_loc}], trg_len={trg_len}")
 
             if prev_end_loc == 0:
                 # input :  0,1,2|3 
@@ -105,7 +123,8 @@ class Evaluator:
             input_ids = input_ids[None,:].to('cuda')
             labels = labels[None,:].to('cuda')
             with torch.no_grad():
-                outputs = self.model(input_ids, labels=labels)
+                # forward process will update the memory in attention module
+                outputs = self.model(input_ids, labels=labels, past_key_values=self.memory)
 
                 # loss is calculated using CrossEntropyLoss which averages over valid labels
                 # N.B. the model only calculates loss over trg_len - 1 labels, because it internally shifts the labels
@@ -138,12 +157,12 @@ class Evaluator:
 
         result = {}
         result[f"sliding_ppl"]=my_ppl
-        with open(os.path.join(self.config["eval_config"]["save_dir"],f"{split}_sliding_result.json"), "w") as f:
+        with open(os.path.join(self.config["eval_config"]["save_dir"],f"{self.config['title']}_{split}_sliding_result.json"), "w") as f:
             json.dump(result, f, indent=4)
 
         result[f"sliding_positions"] = positions
         result[f"sliding_loss"] = positions_loss
-        with open(os.path.join(self.config["eval_config"]["save_dir"],f"{split}_sliding_cache.json"), "w") as f:
+        with open(os.path.join(self.config["eval_config"]["save_dir"],f"{self.config['title']}_{split}_sliding_cache.json"), "w") as f:
             json.dump(result, f, indent=4)
 
         return result
@@ -214,15 +233,34 @@ class Evaluator:
         ppl = [np.exp(l) for l in loss]
         # self.draw(seq_len, loss, xlabel="Sequence_Length",ylabel=f"{split}_standard_loss")
         self.draw(seq_len, ppl, xlabel="Sequence Length", ylabel=f"{split}_standard_ppl", label_training_len=True)
-     
+    
 
     def evaluate(self, tokens, split):
-
-        result = self.sliding_ppl(tokens, stride=self.config['training_len']//2, split=split)
-        self.draw_sliding_ppl(result, split=split)
-
-        result = self.standard_ppl(tokens, stride=128, split=split)
-        self.draw_standard_ppl(result, split=split)
+        
+        # without cache, sliding strategy can get a closer ppl
+        # https://huggingface.co/docs/transformers/main/en/perplexity#calculating-ppl-with-fixed-length-models
+        if self.memory is None:           
+            # overlap half of training length
+            result = self.sliding_ppl(tokens, stride=self.config['training_len']//2, split=split)
+            self.draw_sliding_ppl(result, split=split)
+        
+            result = self.standard_ppl(tokens, stride=128, split=split)
+            self.draw_standard_ppl(result, split=split)
+        else:
+            # with cache, we don't need overlap 
+            title = self.config["title"]
+            
+            self.config["title"] = title+" with training memory"
+            self.memory.restore_memory()
+            result = self.sliding_ppl(tokens, stride=self.config['training_len'], split=split)
+            self.draw_sliding_ppl(result, split=split)
+            
+            
+            self.config["title"] = title+" without training memory" 
+            self.memory.reset_memory()
+            result = self.sliding_ppl(tokens, stride=self.config['training_len'], split=split)
+            self.draw_sliding_ppl(result, split=split)
+            
 
         
 
@@ -238,7 +276,7 @@ class Evaluator:
 
         self.evaluate(valid_tokens, split='valid')
         self.evaluate(test_tokens, split='test')
-        draw_work_memory(self.config, self.model, tokens=test_tokens, test_times=100, data_type="order")
+        draw_work_memory(self.config, self.model, tokens=test_tokens, test_times=100, data_type="order", memory=self.memory)
 
 
 if __name__ == "__main__":

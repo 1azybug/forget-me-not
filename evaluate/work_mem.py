@@ -53,15 +53,38 @@ def get_order_example(length, tokens):
 
     return lm_tokens, copy_tokens, mask
 
+def mem_forward(model, prompt, memory):
+    work_size = memory.work_size
+    s = prompt.size(1)
+    # print(f"[DEBUG] len={s}, prompt shape:{prompt.shape}")
+    all_ids = []
+    with torch.no_grad(): 
+        for beg in range(0, s, work_size):
+            forward_prompt = prompt[:,beg:beg+work_size] 
+            # print(f"[DEBUG] prompt[:,{beg}:{beg+work_size}] ")
+            output = model(forward_prompt,past_key_values=memory)
+            logits = output.logits
+            predicted_token_ids = torch.argmax(logits, dim=-1)
+            predicted_token_ids = predicted_token_ids.squeeze().tolist()
+            all_ids += predicted_token_ids
+    return all_ids
+        
+    
 
-def get_acc(model, example, mask, length):
+def get_acc(model, example, mask, length, memory=None):
     prompt = torch.tensor(example, dtype=torch.long)
     prompt = prompt[None,:].cuda()
+    # [1,S]
     with torch.no_grad():
-        output = model(prompt)
-        logits = output.logits
-        predicted_token_ids = torch.argmax(logits, dim=-1)
-        predicted_token_ids = predicted_token_ids.squeeze().tolist()
+        if memory is None:
+            output = model(prompt)
+            logits = output.logits
+            predicted_token_ids = torch.argmax(logits, dim=-1)
+            predicted_token_ids = predicted_token_ids.squeeze().tolist()
+        else:
+            # clear the memory
+            memory.reset_memory()
+            predicted_token_ids = mem_forward(model, prompt, memory)
 
     # shift right
     predicted_token_ids = [example[0]] + predicted_token_ids[:-1]
@@ -70,12 +93,12 @@ def get_acc(model, example, mask, length):
     src = torch.tensor(example, dtype=torch.long)[mask]
     tgt = torch.tensor(predicted_token_ids, dtype=torch.long)[mask]
 
-    # pre 50% tokens for fewshot prompt, only calculate the accuracy of the last 50% token
+    # pre 50% tokens for few-shot prompt, only calculate the accuracy of the last 50% token
     result = (src[-length//2:] == tgt[-length//2:]).float().mean().item()
     return result
 
 
-def get_length_result(config, model, length, tokens=None, test_times=100, data_type="random"):
+def get_length_result(config, model, length, tokens=None, test_times=100, data_type="random", memory=None):
 
     lm_results = []
     copy_results = []
@@ -88,8 +111,8 @@ def get_length_result(config, model, length, tokens=None, test_times=100, data_t
         else:
             lm_tokens, copy_tokens, mask = get_order_example(length, tokens)
         
-        lm_acc = get_acc(model, lm_tokens, mask, length)
-        copy_acc = get_acc(model, copy_tokens, mask, length)
+        lm_acc = get_acc(model, lm_tokens, mask, length, memory)
+        copy_acc = get_acc(model, copy_tokens, mask, length, memory)
 
         lm_results.append(lm_acc)
         copy_results.append(copy_acc)
@@ -109,7 +132,7 @@ def get_length_result(config, model, length, tokens=None, test_times=100, data_t
         "copy_std":copy_std
     }
 
-def get_result(config, model, tokens=None, test_times=100, data_type="random"):
+def get_result(config, model, tokens=None, test_times=100, data_type="random", memory=None):
 
     # if os.path.exists(os.path.join(config["eval_config"]["save_dir"],f"{data_type}_work_memery_result.json")):
     #     with open(os.path.join(config["eval_config"]["save_dir"],f"{data_type}_work_memery_result.json")) as f:
@@ -128,18 +151,18 @@ def get_result(config, model, tokens=None, test_times=100, data_type="random"):
             break
         
         if length >= 8192:
-            # save time
+            # only test 10 for save time
             test_times = 10
-        result = get_length_result(config, model, length=length, tokens=tokens, test_times=test_times, data_type=data_type)
+        result = get_length_result(config, model, length=length, tokens=tokens, test_times=test_times, data_type=data_type, memory=memory)
         results.append(result)
 
     with open(os.path.join(config["eval_config"]["save_dir"],f"{data_type}_work_memery_result.json"), "w") as f:
         json.dump(results, f, indent=4)
     return results
 
-def draw_work_memory(config, model, tokens=None, test_times=100, data_type="random"):
+def draw_work_memory(config, model, tokens=None, test_times=100, data_type="random", memory=None):
 
-    results = get_result(config, model, tokens=tokens, test_times=test_times, data_type=data_type)
+    results = get_result(config, model, tokens=tokens, test_times=test_times, data_type=data_type, memory=memory)
     length = [result['length'] for result in results]
     lm_acc = [result['lm_mean'] for result in results]
     lm_acc_upper = [result['lm_mean']+result['lm_std'] for result in results]

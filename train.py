@@ -14,6 +14,7 @@ import argparse
 
 from utils.scheduler import get_scheduler
 from models.model import modify
+from models.cache import TrainingCache
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -62,11 +63,11 @@ def setup(rank, world_size):
     # Initialize the distributed environment
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
-def training_step(ddp_model, inputs, rank, accumulation_steps):
+def training_step(ddp_model, inputs, rank, accumulation_steps, memory=None):
     inputs = inputs.to(rank)
     labels = inputs.clone().detach()
-    outputs = ddp_model(input_ids=inputs,labels=labels)
-    loss = outputs[0]
+    outputs = ddp_model(input_ids=inputs,labels=labels, past_key_values=memory)
+    loss = outputs.loss
     return_loss = loss.item()
     loss /= accumulation_steps
     loss.backward()
@@ -105,6 +106,7 @@ def train(rank, args, world_size):
 
     assert world_size == training_config["device_count"], "device_count wrong"
     assert training_config["total_batch_size"] == training_config['batch_size_per_device']*training_config["device_count"]*training_config["gradient_accumulation_steps"]
+    assert training_config["segment_len"] == config["cache_config"]["work_size"]
 
     tokens_path = os.path.join(config["path"]["prepare_data_path"],'train.pt')
     tokens = torch.load(tokens_path)
@@ -126,10 +128,12 @@ def train(rank, args, world_size):
         print(f"[INFO] batch_tokens:{batch_tokens_num} | training_steps:{training_steps}")
     print(f"[INFO] rank{rank} training tokens[{start_index}:{end_index}] | total_tokens:{tokens.shape[0]} | batch_tokens_num_per_gpu:{tokens.shape[0]//training_steps} | training_steps:{training_steps}")
 
-
+    memory = None
     # modify the model
     if "modify_config" in config:
         modify(config["modify_config"])
+        if config["modify_config"]["type"] == "cache":
+            memory = TrainingCache(config["cache_config"])
     
     # Instantiate the model and move it to the corresponding GPU
     cfg = LlamaConfig(**config["model_config"])
@@ -158,9 +162,6 @@ def train(rank, args, world_size):
     if "scheduler_config" in training_config:
         scheduler = get_scheduler(training_config["scheduler_config"], optimizer, training_steps)
     
-    memory = None
-
-
 
     accumulation_steps = training_config["gradient_accumulation_steps"]
     step_num = 0
@@ -183,7 +184,7 @@ def train(rank, args, world_size):
             if scheduler is not None:
                 torch.save(scheduler.state_dict(),os.path.join(training_config["save_dir"],"scheduler.pt"))
             if memory is not None:
-                torch.save(memory,os.path.join(training_config["save_dir"],"memory.pt"))
+                torch.save(memory.state_dict(),os.path.join(training_config["save_dir"],"memory.pt"))
 
         for inputs in tqdm(loader,total=training_steps*accumulation_steps):
             step_num += 1
@@ -191,10 +192,10 @@ def train(rank, args, world_size):
             # print(f"\n{'-'*80}\nstep{step_num}\ndevice:[{rank}]\ninputs:{inputs}\n{'-'*80}")  # for check
 
             if step_num % accumulation_steps == 0:
-                loss = training_step(ddp_model,inputs,rank,accumulation_steps)
+                loss = training_step(ddp_model,inputs,rank,accumulation_steps,memory)
             else:
                 with ddp_model.no_sync():
-                    loss = training_step(ddp_model,inputs,rank,accumulation_steps)
+                    loss = training_step(ddp_model,inputs,rank,accumulation_steps,memory)
 
             info_list.append({
                 "run_time(hours)":(time.time()- start_time)/3600,
@@ -215,6 +216,9 @@ def train(rank, args, world_size):
                     
                 optimizer.zero_grad()
 
+            if memory is not None:
+                if step_num % config["cache_config"]["stop_gradient_step"] == 0:
+                    memory.stop_gradient()
             
             if step_num % (training_config["log_step"]*accumulation_steps) == 0:
                 if rank == 0:
